@@ -1,0 +1,19 @@
+# Development environment overrides
+namespace: development
+
+backend:
+  image:
+    tag: dev
+  replicaCount: 1
+
+frontend:
+  image:
+    tag: dev
+  replicaCount: 1
+  service:
+    type: NodePort
+    nodePort: 30080
+
+postgres:
+  storage:
+    size: 512Mi

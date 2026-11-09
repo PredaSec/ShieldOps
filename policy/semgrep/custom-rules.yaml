@@ -1,0 +1,81 @@
+rules:
+  # ---------------------------------------------------------------------------
+  # Rule A: shieldops.nodejs.sqli-pg-concat-var
+  #
+  # Detects SQL injection pattern where a SQL string is built via binary +
+  # concatenation and then passed to pool.query() / client.query() from the
+  # node-postgres (pg) library.
+  #
+  # Targets V2 in app/backend/src/index.js:
+  #   const sql = "SELECT ..." + keyword + "...";
+  #   pool.query(sql);
+  # ---------------------------------------------------------------------------
+  - id: shieldops.nodejs.sqli-pg-concat-var
+    message: >
+      SQL injection risk: a pg query string is built with string concatenation
+      (+) and passed to pool.query() / client.query() without a parameterised
+      placeholder array.  An attacker who controls the concatenated value can
+      manipulate the query.  Fix: use pool.query(sql, [value]) with $1 placeholders.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      cwe:
+        - "CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')"
+      owasp:
+        - "A03:2021 – Injection"
+      references:
+        - https://owasp.org/Top10/A03_2021-Injection/
+        - https://node-postgres.com/features/queries#parameterized-query
+        - https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html
+      confidence: HIGH
+      likelihood: HIGH
+      impact: CRITICAL
+      subcategory: [vuln]
+      technology: [nodejs, postgres]
+      category: security
+    patterns:
+      - pattern: |
+          $SQL = $A + $B + $C;
+          ...
+          $OBJ.query($SQL);
+      - pattern-not: |
+          $SQL = $A + $B + $C;
+          ...
+          $OBJ.query($SQL, [...]);
+
+  # ---------------------------------------------------------------------------
+  # Rule B: shieldops.nodejs.sqli-pg-template-literal
+  #
+  # Detects SQL injection pattern where a template literal containing at least
+  # one dynamic expression (${...}) is passed directly to pool.query() /
+  # client.query() as the sole argument.
+  #
+  # Catches:
+  #   pool.query(`SELECT ... WHERE id = ${userId}`)
+  #   client.query(`SELECT * FROM ${table}`)
+  # ---------------------------------------------------------------------------
+  - id: shieldops.nodejs.sqli-pg-template-literal
+    message: >
+      SQL injection risk: a template literal with embedded expressions is passed
+      directly to pool.query() / client.query().  Use parameterised queries
+      instead: pool.query('SELECT ... WHERE id = $1', [userId]).
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      cwe:
+        - "CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')"
+      owasp:
+        - "A03:2021 – Injection"
+      references:
+        - https://owasp.org/Top10/A03_2021-Injection/
+        - https://node-postgres.com/features/queries#parameterized-query
+      confidence: HIGH
+      likelihood: HIGH
+      impact: CRITICAL
+      subcategory: [vuln]
+      technology: [nodejs, postgres]
+      category: security
+    pattern: |
+      $OBJ.query(`...`)
+    pattern-not: |
+      $OBJ.query("...")

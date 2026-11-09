@@ -1,0 +1,133 @@
+version: '3.9'
+
+# ShieldOps Dashboard — own PostgreSQL, backend, and frontend
+# Ports chosen to avoid collisions with existing services:
+#   GitLab:             8929
+#   app NodePorts:      30000, 30001, 30081
+#   platform postgres:  5432
+#   LocalStack:         4566
+#   registry:           5000
+#
+# Dashboard ports:
+#   backend:            4000
+#   frontend:           8088
+#   dashboard-postgres: 5434
+
+networks:
+  dashboard-net:
+    name: shieldops-dashboard-net
+    driver: bridge
+  # The shared platform network (GitLab, registry, LocalStack, the kind node).
+  # Declared external so the backend stays attached across recreates — no more
+  # manual `docker network connect` after every `compose up`.
+  shieldops-net:
+    name: docker_shieldops-net
+    external: true
+
+volumes:
+  dashboard-pg-data:
+    name: shieldops-dashboard-pg-data
+
+services:
+  dashboard-postgres:
+    image: postgres:16-alpine
+    container_name: dashboard-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       shieldops_dashboard
+      POSTGRES_USER:     dashboard
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-dashboard_secret}
+    volumes:
+      - dashboard-pg-data:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
+    networks:
+      - dashboard-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dashboard -d shieldops_dashboard"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  dashboard-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: dashboard-backend
+    restart: unless-stopped
+    depends_on:
+      dashboard-postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV:                  production
+      # Containers have no IPv6 route: resolve IPv4 first, skip IPv6 connection attempts
+      NODE_OPTIONS:              --dns-result-order=ipv4first --no-network-family-autoselection
+      PORT:                      4000
+      DB_HOST:                   dashboard-postgres
+      DB_PORT:                   5432
+      DB_NAME:                   shieldops_dashboard
+      DB_USER:                   dashboard
+      DB_PASSWORD:               ${DB_PASSWORD:-dashboard_secret}
+      JWT_SECRET:                ${JWT_SECRET:-change-me-in-production}
+      DASHBOARD_USER:            ${DASHBOARD_USER:-admin}
+      DASHBOARD_PASSWORD:        ${DASHBOARD_PASSWORD:-changeme}
+      AI_SERVICE_URL:            ${AI_SERVICE_URL:-http://shieldops-ai:3000}
+      OPENROUTER_API_KEY:        ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL:          ${OPENROUTER_MODEL:-nvidia/nemotron-3.5-super-vl:free}
+      OPENROUTER_FALLBACK_MODELS: ${OPENROUTER_FALLBACK_MODELS:-recursive/flint-v1.0:free}
+      OPENROUTER_MAX_TOKENS:     ${OPENROUTER_MAX_TOKENS:-4000}
+      GITLAB_WEBHOOK_TOKEN:      ${GITLAB_WEBHOOK_TOKEN:-}
+      GITLAB_API_URL:            ${GITLAB_API_URL:-http://gitlab:8929/api/v4}
+      GITLAB_PROJECT_ID:         ${GITLAB_PROJECT_ID:-root/shieldops}
+      GITLAB_TOKEN:              ${GITLAB_TOKEN:-}
+      SMTP_HOST:                 ${SMTP_HOST:-localhost}
+      SMTP_PORT:                 ${SMTP_PORT:-1025}
+      SMTP_USER:                 ${SMTP_USER:-}
+      SMTP_PASS:                 ${SMTP_PASS:-}
+      SMTP_FROM:                 ${SMTP_FROM:-shieldops@example.com}
+      NOTIFICATION_RECIPIENTS:   ${NOTIFICATION_RECIPIENTS:-ops@example.com}
+      ALLOWED_ORIGINS:           http://localhost:8088,http://localhost:5173
+      LINK_GRAFANA:              ${LINK_GRAFANA:-http://localhost:3000}
+      LINK_PROMETHEUS:           ${LINK_PROMETHEUS:-http://localhost:9090}
+      LINK_LOKI:                 ${LINK_LOKI:-http://localhost:3100}
+      LINK_ZAP:                  ${LINK_ZAP:-}
+      LINK_TRIVY:                ${LINK_TRIVY:-}
+      LINK_SEMGREP:              ${LINK_SEMGREP:-}
+      LINK_GITLAB:               ${LINK_GITLAB:-http://localhost:8929/root/shieldops}
+      # Cluster inspect/manage page — kubectl reads this kubeconfig (server is the
+      # kind node's internal name, reachable from this container on the shared net).
+      KUBECONFIG:                /etc/kube/config
+    ports:
+      - "4000:4000"
+    networks:
+      - dashboard-net
+      - shieldops-net
+    volumes:
+      # Host kubectl (static Go binary, runs on alpine) + internal kubeconfig, read-only.
+      - /usr/local/bin/kubectl:/usr/local/bin/kubectl:ro
+      - ./.kubeconfig-internal:/etc/kube/config:ro
+    command: >
+      sh -c "node src/db/migrate.js && node src/index.js"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  dashboard-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: dashboard-frontend
+    restart: unless-stopped
+    depends_on:
+      - dashboard-backend
+    ports:
+      - "8088:80"
+    networks:
+      - dashboard-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3

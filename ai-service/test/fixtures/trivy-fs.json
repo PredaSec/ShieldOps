@@ -1,0 +1,105 @@
+{
+  "SchemaVersion": 2,
+  "ArtifactName": "app/",
+  "ArtifactType": "filesystem",
+  "Metadata": {
+    "ImageConfig": {
+      "architecture": "",
+      "container": "",
+      "os": ""
+    }
+  },
+  "Results": [
+    {
+      "Target": "app/backend/package.json",
+      "Class": "lang-pkgs",
+      "Type": "node-pkg",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2023-45133",
+          "PkgID": "express@4.18.1",
+          "PkgName": "express",
+          "InstalledVersion": "4.18.1",
+          "FixedVersion": "4.18.3",
+          "Layer": {},
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2023-45133",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory Node.js",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Anpm"
+          },
+          "Title": "express: Open redirect in Express when calling res.redirect with untrusted input",
+          "Description": "Express.js is a web application framework for Node.js. In Express.js before 4.18.3, a maliciously crafted query string can cause unexpected behavior.",
+          "Severity": "CRITICAL",
+          "CweIDs": ["CWE-601"],
+          "CVSS": {
+            "ghsa": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+              "V3Score": 9.1
+            }
+          },
+          "References": ["https://github.com/expressjs/express/releases/tag/4.18.3"],
+          "PublishedDate": "2023-11-14T21:15:00Z",
+          "LastModifiedDate": "2023-11-20T18:10:00Z"
+        },
+        {
+          "VulnerabilityID": "CVE-2023-26159",
+          "PkgID": "pg@8.7.1",
+          "PkgName": "pg",
+          "InstalledVersion": "8.7.1",
+          "FixedVersion": "8.11.3",
+          "Layer": {},
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2023-26159",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory Node.js",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Anpm"
+          },
+          "Title": "pg: SQL injection vulnerability",
+          "Description": "Versions of the package node-postgres before 8.11.3 are vulnerable to SQL Injection via the pg.connect() method.",
+          "Severity": "HIGH",
+          "CweIDs": ["CWE-89"],
+          "CVSS": {
+            "ghsa": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+              "V3Score": 7.8
+            }
+          },
+          "References": ["https://github.com/brianc/node-postgres/releases/tag/pg-8.11.3"],
+          "PublishedDate": "2023-01-26T21:18:00Z",
+          "LastModifiedDate": "2023-02-06T20:06:00Z"
+        },
+        {
+          "VulnerabilityID": "CVE-2024-29041",
+          "PkgID": "express@4.18.1",
+          "PkgName": "express",
+          "InstalledVersion": "4.18.1",
+          "FixedVersion": "4.19.2",
+          "Layer": {},
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://avd.aquasec.com/nvd/cve-2024-29041",
+          "DataSource": {
+            "ID": "ghsa",
+            "Name": "GitHub Security Advisory Node.js",
+            "URL": "https://github.com/advisories?query=type%3Areviewed+ecosystem%3Anpm"
+          },
+          "Title": "express: malformed URLs lead to path traversal",
+          "Description": "Express.js minimalist web framework for Node.js. In express < 4.19.2, client can send malformed URL that can lead to path traversal.",
+          "Severity": "MEDIUM",
+          "CweIDs": ["CWE-22"],
+          "CVSS": {
+            "ghsa": {
+              "V3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+              "V3Score": 5.3
+            }
+          },
+          "References": ["https://github.com/expressjs/express/releases/tag/4.19.2"],
+          "PublishedDate": "2024-03-25T19:15:00Z",
+          "LastModifiedDate": "2024-04-01T00:00:00Z"
+        }
+      ]
+    }
+  ]
+}

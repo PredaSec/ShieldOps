@@ -1,0 +1,71 @@
+{
+  "results": [
+    {
+      "rule_id": "aws-s3-enable-bucket-encryption",
+      "long_id": "aws-s3-enable-bucket-encryption",
+      "rule_description": "Unencrypted S3 bucket.",
+      "rule_provider": "aws",
+      "rule_service": "s3",
+      "impact": "The bucket objects could be read if compromised",
+      "resolution": "Configure bucket encryption",
+      "links": [
+        "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket#enable_bucket_encryption",
+        "https://docs.aws.amazon.com/AmazonS3/latest/userguide/default-bucket-encryption.html"
+      ],
+      "description": "Bucket does not have encryption enabled",
+      "severity": "HIGH",
+      "warning": false,
+      "status": 0,
+      "resource": "aws_s3_bucket.shieldops_reports",
+      "location": {
+        "filename": "terraform/main.tf",
+        "start_line": 14,
+        "end_line": 22
+      }
+    },
+    {
+      "rule_id": "aws-s3-enable-bucket-logging",
+      "long_id": "aws-s3-enable-bucket-logging",
+      "rule_description": "S3 Bucket does not have logging enabled.",
+      "rule_provider": "aws",
+      "rule_service": "s3",
+      "impact": "There is no way to determine the access to this bucket",
+      "resolution": "Add a logging block to the resource to enable access logging",
+      "links": [
+        "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket"
+      ],
+      "description": "Bucket does not have logging enabled",
+      "severity": "MEDIUM",
+      "warning": false,
+      "status": 0,
+      "resource": "aws_s3_bucket.shieldops_reports",
+      "location": {
+        "filename": "terraform/main.tf",
+        "start_line": 14,
+        "end_line": 22
+      }
+    },
+    {
+      "rule_id": "aws-s3-block-public-acls",
+      "long_id": "aws-s3-block-public-acls",
+      "rule_description": "S3 bucket does not have public ACLs blocked.",
+      "rule_provider": "aws",
+      "rule_service": "s3",
+      "impact": "Public access to buckets can lead to data leakage",
+      "resolution": "Enable blocking of public ACLs on S3 bucket",
+      "links": [
+        "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_public_access_block"
+      ],
+      "description": "No public access block so policy can be used to allow public access",
+      "severity": "HIGH",
+      "warning": false,
+      "status": 0,
+      "resource": "aws_s3_bucket.shieldops_assets",
+      "location": {
+        "filename": "terraform/main.tf",
+        "start_line": 1,
+        "end_line": 12
+      }
+    }
+  ]
+}

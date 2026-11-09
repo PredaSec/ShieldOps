@@ -1,0 +1,787 @@
+# =============================================================================
+# ShieldOps — GitLab CI/CD Pipeline
+# 8 Security Gates | Phase 3
+#
+# Stages:
+#   secrets      G1  Gitleaks        — detect committed secrets
+#   sast         G2  Semgrep         — SAST + custom SQLi rule
+#   sca-image    G3  Trivy           — SCA (deps) + Docker image CVEs
+#   iac          G4  Checkov + tfsec — IaC misconfiguration
+#   policy       G5  OPA/Conftest    — Helm manifest governance (soft-fail)
+#   ai-staging   G6  [scaffolded]    — AI analysis + staging deploy
+#   dast         G7  OWASP ZAP       — DAST baseline / full scan
+#   ai-prod      G8  [scaffolded]    — AI analysis + production deploy
+#
+# Runner: Docker executor on shieldops-net
+# Registry: registry:5000 (plain HTTP, insecure-registries configured)
+# S3 endpoint: http://localstack:4566 (LocalStack community)
+# =============================================================================
+
+stages:
+  - secrets
+  - sast
+  - sca-image
+  - iac
+  - policy
+  - ai-staging
+  - dast
+  - ai-prod
+
+# ---------------------------------------------------------------------------
+# Global variables
+# ---------------------------------------------------------------------------
+variables:
+  # LocalStack / AWS
+  AWS_ENDPOINT_URL:       "http://localstack:4566"
+  AWS_DEFAULT_REGION:     "us-east-1"
+  AWS_ACCESS_KEY_ID:      "test"
+  AWS_SECRET_ACCESS_KEY:  "test"
+  S3_REPORTS_BUCKET:      "shieldops-reports"
+
+  # Registry (runner is inside shieldops-net)
+  REGISTRY:               "registry:5000"
+  BACKEND_IMAGE:          "${REGISTRY}/shieldops-backend:${CI_PIPELINE_IID}"
+  FRONTEND_IMAGE:         "${REGISTRY}/shieldops-frontend:${CI_PIPELINE_IID}"
+
+  # Build jobs use the host Docker daemon via the mounted /var/run/docker.sock
+  # (the runner is configured with that volume), so no dind service is needed.
+
+  # Staging app URL for ZAP — the staging frontend NodePort on the kind node,
+  # reachable from the ZAP job (both on docker_shieldops-net). 30081 = values-staging nodePort.
+  STAGING_URL:            "http://shieldops-cluster-control-plane:30081"
+
+# ---------------------------------------------------------------------------
+# Reusable: upload report to S3 after each job
+# ---------------------------------------------------------------------------
+.upload_report: &upload_report
+  after_script:
+    - |
+      pip install awscli --quiet 2>/dev/null || true
+      bash ci/upload-report.sh "${GATE_NAME}" ${REPORT_FILES} || true
+
+# ---------------------------------------------------------------------------
+# Reusable: AWS CLI setup (installed into any image)
+# ---------------------------------------------------------------------------
+.aws_setup: &aws_setup
+  before_script:
+    - pip install awscli --quiet 2>/dev/null || pip3 install awscli --quiet 2>/dev/null || true
+
+# =============================================================================
+# G1 — Gitleaks: detect committed secrets
+# =============================================================================
+g1-secrets:
+  stage: secrets
+  image:
+    name: zricethezav/gitleaks:v8.18.2
+    entrypoint: [""]
+  variables:
+    GATE_NAME: "g1-secrets"
+    REPORT_FILES: "gitleaks.json"
+  script:
+    # Scan full git history AND the current working tree
+    - gitleaks detect
+        --source .
+        --config .gitleaks.toml
+        --report-format json
+        --report-path gitleaks.json
+        --log-level info
+        --exit-code 1
+  allow_failure: false
+  artifacts:
+    name: "g1-secrets-${CI_PIPELINE_IID}"
+    when: always
+    expire_in: 30 days
+    paths:
+      - gitleaks.json
+    reports:
+      # GitLab secret detection report format
+      secret_detection: gitleaks.json
+  after_script:
+    - |
+      apk add --no-cache py3-pip --quiet 2>/dev/null || true
+      pip3 install awscli --quiet 2>/dev/null || true
+      aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 mb "s3://${S3_REPORTS_BUCKET}" 2>/dev/null || true
+      aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 cp gitleaks.json \
+          "s3://${S3_REPORTS_BUCKET}/${CI_PIPELINE_ID}/g1-secrets/gitleaks.json" \
+          --no-progress 2>/dev/null || true
+
+# =============================================================================
+# G2 — Semgrep: SAST with p/owasp-top-ten, p/nodejs, custom SQLi rule
+# =============================================================================
+g2-sast:
+  stage: sast
+  image: returntocorp/semgrep:1.58.0
+  variables:
+    SEMGREP_APP_TOKEN: ""   # set in GitLab CI/CD variables if using Semgrep Cloud
+    GATE_NAME: "g2-sast"
+  script:
+    # Modern semgrep rejects a repeated --output flag, so emit SARIF and JSON
+    # in separate runs. SARIF (GitLab SAST report) first, non-blocking; then
+    # JSON with --error to set the gate's pass/fail.
+    # Scan the application under test (whatever lands under app/). Targeting app/
+    # keeps the gate about the committed app, not ShieldOps' own tooling.
+    - semgrep scan
+        --config p/owasp-top-ten
+        --config p/nodejs
+        --config r/all
+        --json --output semgrep.json
+        --error
+        app/
+    # Run unit tests on the custom rule (non-blocking in CI — informational)
+    - semgrep --test policy/semgrep/ || true
+  allow_failure: false
+  artifacts:
+    name: "g2-sast-${CI_PIPELINE_IID}"
+    when: always
+    expire_in: 30 days
+    paths:
+      - semgrep.sarif
+      - semgrep.json
+    reports:
+      sast: semgrep.sarif
+  after_script:
+    - |
+      pip install awscli --quiet 2>/dev/null || pip3 install awscli --quiet 2>/dev/null || true
+      aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 mb "s3://${S3_REPORTS_BUCKET}" 2>/dev/null || true
+      for f in semgrep.sarif semgrep.json; do
+        [ -f "$f" ] && aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+            s3 cp "$f" "s3://${S3_REPORTS_BUCKET}/${CI_PIPELINE_ID}/g2-sast/$f" \
+            --no-progress 2>/dev/null || true
+      done
+
+# =============================================================================
+# G3 — Trivy: SCA (filesystem) + Docker image scan
+# Build image first, then run both scans.
+# =============================================================================
+
+# Job 3a: Build images on the host daemon (socket mount) and push to the
+# registry via its host-published port (localhost:5000 is insecure-OK).
+# The registry:5000 tags stay in the daemon so the Trivy image job finds them.
+g3-build-image:
+  stage: sca-image
+  image: docker:24.0.6
+  variables:
+    # Legacy builder reuses locally-cached base images without a registry
+    # metadata round-trip (avoids flaky IPv6 reach to docker.io for pinned bases).
+    DOCKER_BUILDKIT: "0"
+  script:
+    # Auto-discover every app under app/ that ships a Dockerfile, build + push each.
+    # Image name is derived from the directory (app/backend -> shieldops-backend,
+    # app/foo -> shieldops-foo). `find ... -name Dockerfile` matches the exact file
+    # name only, so alternates like Dockerfile.secure are intentionally skipped.
+    # The "primary" image (backend if present, else the first one built) is exported
+    # via a dotenv artifact so the image-scan gate knows what to scan.
+    - |
+      set -e
+      built=""
+      primary=""
+      for df in $(find app -type f -name Dockerfile | sort); do
+        dir=$(dirname "$df")
+        name=$(basename "$dir")
+        img="${REGISTRY}/shieldops-${name}"
+        echo "── building '${name}' from ${df}"
+        docker build \
+          --tag "${img}:${CI_PIPELINE_IID}" \
+          --tag "${img}:latest" \
+          --label "pipeline=${CI_PIPELINE_ID}" \
+          --label "git-sha=${CI_COMMIT_SHA}" \
+          --file "${df}" "${dir}"
+        # Push through the registry's host-published port (localhost = insecure-OK).
+        docker tag "${img}:${CI_PIPELINE_IID}" "localhost:5000/shieldops-${name}:${CI_PIPELINE_IID}"
+        docker push "localhost:5000/shieldops-${name}:${CI_PIPELINE_IID}"
+        built="${built} ${name}"
+        if [ "${name}" = "backend" ] || [ -z "${primary}" ]; then
+          primary="${img}:${CI_PIPELINE_IID}"
+        fi
+      done
+      if [ -z "${built}" ]; then
+        echo "No Dockerfiles found under app/ — nothing to build."
+      else
+        echo "Built images:${built}"
+      fi
+      # PRIMARY_IMAGE flows to g3-trivy-image via the dotenv artifact below.
+      echo "PRIMARY_IMAGE=${primary}" > build.env
+      cat build.env
+  allow_failure: false
+  artifacts:
+    reports:
+      dotenv: build.env
+
+# Job 3b: Trivy filesystem scan (SCA + secrets + misconfig)
+g3-trivy-fs:
+  stage: sca-image
+  needs: [g3-build-image]
+  image:
+    name: aquasec/trivy:0.50.1
+    entrypoint: [""]
+  variables:
+    GATE_NAME: "g3-trivy-fs"
+    # Cache the trivy DB between runs
+    TRIVY_CACHE_DIR: ".trivycache"
+  cache:
+    key: trivy-db-cache
+    paths:
+      - .trivycache/
+  script:
+    # Full-severity report (non-blocking) — feeds the dashboard / AI analysis.
+    - trivy fs
+        --scanners vuln,secret,misconfig
+        --severity CRITICAL,HIGH,MEDIUM
+        --exit-code 0
+        --ignore-unfixed
+        --format json
+        --output trivy-fs.json
+        app/ || true
+    # Gate: only CRITICAL blocks (per policy/trivy/POLICY.md); HIGH/MEDIUM warn.
+    # K8s-manifest hardening (read-only-root-fs, ports) is OPA's domain (G5).
+    - trivy fs
+        --scanners vuln,secret,misconfig
+        --severity CRITICAL
+        --exit-code 1
+        --ignore-unfixed
+        app/
+  allow_failure: false
+  artifacts:
+    name: "g3-trivy-fs-${CI_PIPELINE_IID}"
+    when: always
+    expire_in: 30 days
+    paths:
+      - trivy-fs.json
+  after_script:
+    - |
+      apk add --no-cache aws-cli 2>/dev/null || pip3 install awscli --quiet 2>/dev/null || true
+      aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 mb "s3://${S3_REPORTS_BUCKET}" 2>/dev/null || true
+      [ -f trivy-fs.json ] && aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 cp trivy-fs.json \
+          "s3://${S3_REPORTS_BUCKET}/${CI_PIPELINE_ID}/g3-trivy/trivy-fs.json" \
+          --no-progress 2>/dev/null || true
+
+# Job 3c: Trivy image scan (built backend image)
+g3-trivy-image:
+  stage: sca-image
+  needs: [g3-build-image]
+  image:
+    name: aquasec/trivy:0.50.1
+    entrypoint: [""]
+  variables:
+    GATE_NAME: "g3-trivy-image"
+    TRIVY_CACHE_DIR: ".trivycache"
+  cache:
+    key: trivy-db-cache
+    paths:
+      - .trivycache/
+  script:
+    # PRIMARY_IMAGE comes from g3-build-image's dotenv; fall back to the legacy name.
+    - echo "Image under test:${PRIMARY_IMAGE:-${BACKEND_IMAGE}}"
+    # CRITICAL check — blocking. Each trivy call is its own script line so a
+    # non-zero exit fails the job (a combined block would mask it).
+    - |
+      IMG="${PRIMARY_IMAGE:-${BACKEND_IMAGE}}"
+      if [ -z "$IMG" ]; then
+        echo "No application image was built (no Dockerfile under app/) — skipping image scan."
+        echo '{"Results":[]}' > trivy-image-critical.json
+        exit 0
+      fi
+      trivy image --severity CRITICAL --exit-code 1 --ignore-unfixed \
+        --format json --output trivy-image-critical.json "$IMG"
+    # Full severity report (non-blocking) — for dashboard / AI analysis
+    - |
+      IMG="${PRIMARY_IMAGE:-${BACKEND_IMAGE}}"
+      if [ -z "$IMG" ]; then echo '{"Results":[]}' > trivy-image.json; exit 0; fi
+      trivy image --severity CRITICAL,HIGH,MEDIUM --exit-code 0 --ignore-unfixed \
+        --format json --output trivy-image.json "$IMG"
+  allow_failure: false
+  artifacts:
+    name: "g3-trivy-image-${CI_PIPELINE_IID}"
+    when: always
+    expire_in: 30 days
+    paths:
+      - trivy-image.json
+      - trivy-image-critical.json
+  after_script:
+    - |
+      apk add --no-cache aws-cli 2>/dev/null || pip3 install awscli --quiet 2>/dev/null || true
+      aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 mb "s3://${S3_REPORTS_BUCKET}" 2>/dev/null || true
+      for f in trivy-image.json trivy-image-critical.json; do
+        [ -f "$f" ] && aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+            s3 cp "$f" \
+            "s3://${S3_REPORTS_BUCKET}/${CI_PIPELINE_ID}/g3-trivy/$f" \
+            --no-progress 2>/dev/null || true
+      done
+
+# =============================================================================
+# G4 — Checkov + tfsec: IaC misconfiguration scanning over terraform/
+# Rules: only on .tf changes (or scheduled/manual trigger)
+# =============================================================================
+g4-checkov:
+  stage: iac
+  image:
+    name: bridgecrew/checkov:3.2.33
+    entrypoint: [""]
+  variables:
+    GATE_NAME: "g4-checkov"
+  rules:
+    # Always run on scheduled pipelines
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    # Run on MR pipelines
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    # Run on pushes that touch .tf files
+    - if: '$CI_COMMIT_BRANCH'
+      changes:
+        - "terraform/**/*.tf"
+        - ".gitlab-ci.yml"
+    # Allow manual trigger on any branch
+    - when: manual
+      allow_failure: true
+  script:
+    # Full report (non-blocking). Redirect JSON to a real file — checkov 3.x's
+    # --output-file creates a directory, which breaks artifact upload.
+    - checkov --directory terraform/ --output json --soft-fail > checkov.json || true
+    # Gate: the S3 controls that remediate V7 (encryption/versioning/public-access).
+    - checkov
+        --directory terraform/
+        --check CKV_AWS_19,CKV_AWS_21,CKV_AWS_20,CKV_AWS_55
+        --output cli
+  allow_failure: false
+  artifacts:
+    name: "g4-checkov-${CI_PIPELINE_IID}"
+    when: always
+    expire_in: 30 days
+    paths:
+      - checkov.json
+  after_script:
+    - |
+      pip install awscli --quiet 2>/dev/null || pip3 install awscli --quiet 2>/dev/null || true
+      aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 mb "s3://${S3_REPORTS_BUCKET}" 2>/dev/null || true
+      [ -f checkov.json ] && aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 cp checkov.json \
+          "s3://${S3_REPORTS_BUCKET}/${CI_PIPELINE_ID}/g4-iac/checkov.json" \
+          --no-progress 2>/dev/null || true
+
+g4-tfsec:
+  stage: iac
+  image:
+    name: aquasec/tfsec:v1.28.6
+    entrypoint: [""]
+  variables:
+    GATE_NAME: "g4-tfsec"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+      changes:
+        - "terraform/**/*.tf"
+        - ".gitlab-ci.yml"
+    - when: manual
+      allow_failure: true
+  script:
+    - tfsec terraform/
+        --format json
+        --out tfsec.json
+        --minimum-severity LOW
+        --soft-fail
+      || true
+    # Strict CRITICAL check
+    - tfsec terraform/
+        --minimum-severity CRITICAL
+        --format lovely
+  allow_failure: false
+  artifacts:
+    name: "g4-tfsec-${CI_PIPELINE_IID}"
+    when: always
+    expire_in: 30 days
+    paths:
+      - tfsec.json
+  after_script:
+    - |
+      apk add --no-cache py3-pip --quiet 2>/dev/null || true
+      pip3 install awscli --quiet 2>/dev/null || true
+      aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 mb "s3://${S3_REPORTS_BUCKET}" 2>/dev/null || true
+      [ -f tfsec.json ] && aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 cp tfsec.json \
+          "s3://${S3_REPORTS_BUCKET}/${CI_PIPELINE_ID}/g4-iac/tfsec.json" \
+          --no-progress 2>/dev/null || true
+
+# =============================================================================
+# G5 — OPA/Conftest: Helm manifest governance (SOFT-FAIL)
+# Violations are logged and forwarded to AI analysis; pipeline is not blocked.
+# =============================================================================
+g5-conftest:
+  stage: policy
+  image:
+    name: openpolicyagent/conftest:v0.57.0
+    entrypoint: [""]
+  variables:
+    GATE_NAME: "g5-conftest"
+  script:
+    - apk add --no-cache helm --quiet 2>/dev/null ||
+      (apk add --no-cache curl --quiet 2>/dev/null &&
+       curl -sSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash)
+    # Render Helm templates and pipe into conftest
+    - helm template shieldops app/helm/shieldops-app
+        -f app/helm/shieldops-app/values-staging.yaml
+        --namespace staging
+      | conftest test
+          --policy policy/opa
+          --output json
+          --no-fail
+          -
+      > conftest.json 2>&1 || true
+    # Also run the unit tests — informational
+    - conftest verify --policy policy/opa || true
+    # Print summary to job log
+    - |
+      cat conftest.json | python3 -c "
+      import json, sys
+      data = json.load(sys.stdin)
+      failures = [r for doc in data for r in doc.get('failures', [])]
+      print(f'OPA findings: {len(failures)} violation(s)')
+      for f in failures:
+          print('  FAIL: ' + str(f.get('msg', f)))
+      " 2>/dev/null || cat conftest.json
+  allow_failure: true   # SOFT-FAIL: violations log but do not block
+  artifacts:
+    name: "g5-conftest-${CI_PIPELINE_IID}"
+    when: always
+    expire_in: 30 days
+    paths:
+      - conftest.json
+  after_script:
+    - |
+      apk add --no-cache py3-pip --quiet 2>/dev/null || true
+      pip3 install awscli --quiet 2>/dev/null || true
+      aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 mb "s3://${S3_REPORTS_BUCKET}" 2>/dev/null || true
+      [ -f conftest.json ] && aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 cp conftest.json \
+          "s3://${S3_REPORTS_BUCKET}/${CI_PIPELINE_ID}/g5-opa/conftest.json" \
+          --no-progress 2>/dev/null || true
+
+# =============================================================================
+# G6 — AI Staging Analysis + Manual Approval + Helm Deploy to staging
+# [SCAFFOLDED — Phase 4 will implement the Gemini AI service calls]
+# =============================================================================
+
+# G6a: Aggregate reports and call AI analysis service (Phase 4)
+#
+# GEMINI_API_KEY: set as a masked GitLab CI/CD variable
+#   Settings → CI/CD → Variables → Add variable
+#   Key: GEMINI_API_KEY | Masked: yes | Protected: yes | Type: Variable
+#   Get a free key at: https://aistudio.google.com/app/apikey
+#   If not set, the service uses the rule-based fallback and still exits 0.
+g6-ai-staging-analysis:
+  stage: ai-staging
+  image: node:20-alpine
+  needs:
+    - g1-secrets
+    - g2-sast
+    - g3-trivy-fs
+    - g3-trivy-image
+    - g4-checkov
+    - g4-tfsec
+    - g5-conftest
+  dependencies:
+    - g1-secrets
+    - g2-sast
+    - g3-trivy-fs
+    - g3-trivy-image
+    - g4-checkov
+    - g4-tfsec
+    - g5-conftest
+  variables:
+    # GEMINI_API_KEY is a masked GitLab CI variable — do NOT hardcode here
+    GEMINI_API_KEY: "${GEMINI_API_KEY}"
+    # Preferred AI provider (OpenAI-compatible, free model). Falls back to Gemini, then rule-based.
+    OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+    OPENROUTER_MODEL: "openai/gpt-oss-120b:free"
+    # Post the generated AI report to the dashboard (single pane of glass).
+    DASHBOARD_URL: "http://dashboard-backend:4000"
+    DASHBOARD_INGEST_TOKEN: "${DASHBOARD_INGEST_TOKEN}"
+  script:
+    - apk add --no-cache aws-cli --quiet 2>/dev/null || true
+    # Install the AI service
+    - cd ai-service && npm ci --omit=dev --quiet && cd ..
+    # Run AI analysis against the artifact reports in the workspace root
+    # Falls back to rule-based if GEMINI_API_KEY is unset or Gemini fails
+    - |
+      node ai-service/src/index.js analyze \
+        --input . \
+        --stage staging \
+        --out . \
+        --format json,md \
+        --pipeline-id "${CI_PIPELINE_ID}" \
+      || true   # never hard-block — fallback always produces output
+    # Verify outputs were produced; create minimal fallback if not
+    - |
+      if [ ! -f ai-report-staging.json ]; then
+        echo '{"source":"fallback","recommendation":"BACK_TO_DEV","rationale":"Analysis service failed to produce output","riskScore":10,"riskLevel":"UNKNOWN","stage":"staging"}' > ai-report-staging.json
+        echo "# AI Staging Analysis\n\nFallback: analysis service did not produce output." > ai-report-staging.md
+      fi
+    - echo "=== AI Report (staging) ==="; cat ai-report-staging.json | head -20
+    # Push the report to the dashboard so it shows under the pipeline (non-fatal).
+    - sh ci/post-report.sh staging ai-report-staging.json ai-report-staging.md || true
+    # Upload to S3
+    - |
+      aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 mb "s3://${S3_REPORTS_BUCKET}" 2>/dev/null || true
+      aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 cp ai-report-staging.json \
+          "s3://${S3_REPORTS_BUCKET}/${CI_PIPELINE_ID}/g6-ai-staging/ai-report-staging.json" \
+          --no-progress 2>/dev/null || true
+      aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 cp ai-report-staging.md \
+          "s3://${S3_REPORTS_BUCKET}/${CI_PIPELINE_ID}/g6-ai-staging/ai-report-staging.md" \
+          --no-progress 2>/dev/null || true
+  allow_failure: false   # job succeeds even if recommendation is BACK_TO_DEV (human decides)
+  artifacts:
+    name: "g6-ai-staging-${CI_PIPELINE_IID}"
+    when: always
+    expire_in: 30 days
+    paths:
+      - ai-report-staging.json
+      - ai-report-staging.md
+
+# G6b: Manual approval gate → Helm deploy to staging
+g6-deploy-staging:
+  stage: ai-staging
+  image:
+    name: alpine/helm:3.14.0
+    entrypoint: [""]
+  needs: [g6-ai-staging-analysis]
+  environment:
+    name: staging
+    url: http://staging.shieldops.local
+  when: manual   # Human must approve after reviewing the AI report
+  script:
+    - apk add --no-cache kubectl curl --quiet 2>/dev/null || true
+    # TODO Phase 4: receive DEPLOY approval signal from AI service
+    # The manual trigger here is the human approval gate; Phase 4 may add
+    # an automated pre-check that blocks the gate if Gemini says BACK_TO_DEV.
+    - echo "Deploying to staging namespace..."
+    - helm upgrade --install shieldops
+        app/helm/shieldops-app
+        --namespace staging
+        --create-namespace
+        -f app/helm/shieldops-app/values-staging.yaml
+        --set backend.image.tag="${CI_PIPELINE_IID}"
+        --set frontend.image.tag="${CI_PIPELINE_IID}"
+        --wait
+        --timeout 5m
+  allow_failure: false
+
+# =============================================================================
+# G7 — OWASP ZAP: DAST against deployed staging app
+# Baseline scan on every merge; full active scan on schedule
+# =============================================================================
+g7-zap-baseline:
+  stage: dast
+  image:
+    name: ghcr.io/zaproxy/zaproxy:stable
+    entrypoint: [""]
+  needs: [g6-deploy-staging]
+  rules:
+    # Baseline on every non-scheduled pipeline (merge / push)
+    - if: '$CI_PIPELINE_SOURCE != "schedule"'
+  variables:
+    GATE_NAME: "g7-zap-baseline"
+  script:
+    - mkdir -p /zap/wrk
+    # Baseline scan: passive rules only, no active attack
+    - zap-baseline.py
+        -t "${STAGING_URL}"
+        -J zap-report.json
+        -r zap-report.html
+        -I
+        -m 3
+      || true
+    - cp /zap/wrk/zap-report.json . 2>/dev/null || true
+    - cp /zap/wrk/zap-report.html . 2>/dev/null || true
+  allow_failure: false
+  artifacts:
+    name: "g7-zap-baseline-${CI_PIPELINE_IID}"
+    when: always
+    expire_in: 30 days
+    paths:
+      - zap-report.json
+      - zap-report.html
+    reports:
+      dast: zap-report.json
+  after_script:
+    - |
+      pip3 install awscli --quiet 2>/dev/null || true
+      aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 mb "s3://${S3_REPORTS_BUCKET}" 2>/dev/null || true
+      for f in zap-report.json zap-report.html; do
+        [ -f "$f" ] && aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+            s3 cp "$f" \
+            "s3://${S3_REPORTS_BUCKET}/${CI_PIPELINE_ID}/g7-zap/$f" \
+            --no-progress 2>/dev/null || true
+      done
+
+g7-zap-full:
+  stage: dast
+  image:
+    name: ghcr.io/zaproxy/zaproxy:stable
+    entrypoint: [""]
+  needs: [g6-deploy-staging]
+  rules:
+    # Full active scan on nightly schedule only
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+  variables:
+    GATE_NAME: "g7-zap-full"
+  script:
+    - mkdir -p /zap/wrk
+    # Full scan: active attack mode — finds V2/V4 class vulnerabilities
+    - zap-full-scan.py
+        -t "${STAGING_URL}"
+        -J zap-full-report.json
+        -r zap-full-report.html
+        -I
+      || true
+    - cp /zap/wrk/zap-full-report.json . 2>/dev/null || true
+    - cp /zap/wrk/zap-full-report.html . 2>/dev/null || true
+  allow_failure: false
+  artifacts:
+    name: "g7-zap-full-${CI_PIPELINE_IID}"
+    when: always
+    expire_in: 30 days
+    paths:
+      - zap-full-report.json
+      - zap-full-report.html
+  after_script:
+    - |
+      pip3 install awscli --quiet 2>/dev/null || true
+      aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 mb "s3://${S3_REPORTS_BUCKET}" 2>/dev/null || true
+      for f in zap-full-report.json zap-full-report.html; do
+        [ -f "$f" ] && aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+            s3 cp "$f" \
+            "s3://${S3_REPORTS_BUCKET}/${CI_PIPELINE_ID}/g7-zap/$f" \
+            --no-progress 2>/dev/null || true
+      done
+
+# =============================================================================
+# G8 — AI Production Analysis + Manual Approval + Helm Deploy to production
+# Phase 4: calls the shieldops-ai service with all G1-G7 reports from S3
+#
+# GEMINI_API_KEY: masked GitLab CI/CD variable (same as G6).
+# Falls back to rule-based analysis if key is absent or Gemini is unreachable.
+# =============================================================================
+
+# G8a: Aggregate all reports (G1–G7) from S3 and call AI analysis service
+g8-ai-prod-analysis:
+  stage: ai-prod
+  image: node:20-alpine
+  needs:
+    - g7-zap-baseline
+    - g6-ai-staging-analysis
+  dependencies:
+    - g7-zap-baseline
+    - g6-ai-staging-analysis
+  variables:
+    GEMINI_API_KEY: "${GEMINI_API_KEY}"
+    # Preferred AI provider (OpenAI-compatible, free model). Falls back to Gemini, then rule-based.
+    OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+    OPENROUTER_MODEL: "openai/gpt-oss-120b:free"
+    # Post the generated AI report to the dashboard (single pane of glass).
+    DASHBOARD_URL: "http://dashboard-backend:4000"
+    DASHBOARD_INGEST_TOKEN: "${DASHBOARD_INGEST_TOKEN}"
+  script:
+    - apk add --no-cache aws-cli --quiet 2>/dev/null || true
+    # Install the AI service
+    - cd ai-service && npm ci --omit=dev --quiet && cd ..
+    # Download all prior reports from S3 for comprehensive AI analysis
+    - |
+      mkdir -p /tmp/all-reports
+      aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 sync \
+          "s3://${S3_REPORTS_BUCKET}/${CI_PIPELINE_ID}/" \
+          /tmp/all-reports/ \
+          --no-progress 2>/dev/null || true
+      echo "Downloaded $(find /tmp/all-reports -name '*.json' | wc -l) JSON reports from S3"
+    # Also copy workspace artifacts (ZAP report from g7-zap-baseline dependency)
+    - |
+      for f in zap-report.json gitleaks.json semgrep.json semgrep.sarif \
+                trivy-fs.json trivy-image.json checkov.json tfsec.json conftest.json; do
+        [ -f "$f" ] && cp "$f" /tmp/all-reports/ || true
+      done
+    # Run AI analysis against all downloaded + workspace reports
+    # Falls back to rule-based if GEMINI_API_KEY is unset or Gemini fails
+    - |
+      node ai-service/src/index.js analyze \
+        --input /tmp/all-reports \
+        --stage prod \
+        --out . \
+        --format json,md \
+        --pipeline-id "${CI_PIPELINE_ID}" \
+      || true   # never hard-block — fallback always produces output
+    # Verify outputs were produced; create minimal fallback if not
+    - |
+      if [ ! -f ai-report-prod.json ]; then
+        echo '{"source":"fallback","recommendation":"BACK_TO_DEV","rationale":"Analysis service failed to produce output","riskScore":10,"riskLevel":"UNKNOWN","stage":"prod"}' > ai-report-prod.json
+        echo "# AI Production Analysis\n\nFallback: analysis service did not produce output." > ai-report-prod.md
+      fi
+    - echo "=== AI Report (prod) ==="; cat ai-report-prod.json | head -20
+    # Push the report to the dashboard so it shows under the pipeline (non-fatal).
+    - sh ci/post-report.sh production ai-report-prod.json ai-report-prod.md || true
+    - |
+      aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 cp ai-report-prod.json \
+          "s3://${S3_REPORTS_BUCKET}/${CI_PIPELINE_ID}/g8-ai-prod/ai-report-prod.json" \
+          --no-progress 2>/dev/null || true
+      aws --endpoint-url "${AWS_ENDPOINT_URL}" \
+          s3 cp ai-report-prod.md \
+          "s3://${S3_REPORTS_BUCKET}/${CI_PIPELINE_ID}/g8-ai-prod/ai-report-prod.md" \
+          --no-progress 2>/dev/null || true
+  allow_failure: false   # job succeeds even if recommendation is BACK_TO_DEV (human decides)
+  artifacts:
+    name: "g8-ai-prod-${CI_PIPELINE_IID}"
+    when: always
+    expire_in: 30 days
+    paths:
+      - ai-report-prod.json
+      - ai-report-prod.md
+
+# G8b: Manual approval gate → Helm deploy to production
+# Human MUST review the AI report (ai-report-prod.json/.md) before clicking "Run"
+g8-deploy-production:
+  stage: ai-prod
+  image:
+    name: alpine/helm:3.14.0
+    entrypoint: [""]
+  needs: [g8-ai-prod-analysis]
+  environment:
+    name: production
+    url: http://shieldops.local
+  when: manual   # Human must review AI report before approving prod deploy
+  script:
+    - apk add --no-cache kubectl --quiet 2>/dev/null || true
+    # Inform the operator of the AI recommendation before proceeding
+    - |
+      if [ -f ai-report-prod.json ]; then
+        RECOMMENDATION=$(cat ai-report-prod.json | grep -o '"recommendation":"[^"]*"' | cut -d'"' -f4 || echo "UNKNOWN")
+        RISK_LEVEL=$(cat ai-report-prod.json | grep -o '"riskLevel":"[^"]*"' | cut -d'"' -f4 || echo "UNKNOWN")
+        echo "============================================================"
+        echo " AI Recommendation: ${RECOMMENDATION}"
+        echo " Risk Level:        ${RISK_LEVEL}"
+        echo " Operator has reviewed and approved deployment to production."
+        echo "============================================================"
+      fi
+    - echo "Deploying to production namespace..."
+    - helm upgrade --install shieldops
+        app/helm/shieldops-app
+        --namespace production
+        --create-namespace
+        -f app/helm/shieldops-app/values-prod.yaml
+        --set backend.image.tag="${CI_PIPELINE_IID}"
+        --set frontend.image.tag="${CI_PIPELINE_IID}"
+        --wait
+        --timeout 10m
+  allow_failure: false

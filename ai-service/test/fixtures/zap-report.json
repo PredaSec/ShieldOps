@@ -1,0 +1,122 @@
+{
+  "@version": "2.14.0",
+  "@generated": "Mon, 02 Jun 2026 10:00:00",
+  "site": [
+    {
+      "@name": "http://shieldops-frontend.staging.svc.cluster.local",
+      "@host": "shieldops-frontend.staging.svc.cluster.local",
+      "@port": "80",
+      "@ssl": "false",
+      "alerts": [
+        {
+          "pluginid": "40012",
+          "alertRef": "40012",
+          "alert": "Cross Site Scripting (Reflected)",
+          "name": "Cross Site Scripting (Reflected)",
+          "riskcode": "3",
+          "confidence": "2",
+          "riskdesc": "High (Medium)",
+          "desc": "<p>Cross-site Scripting (XSS) is an attack technique that involves echoing attacker-supplied code into a user's browser instance. A browser instance can be a standard web browser client, or a browser object embedded in a software product such as the browser within WinAmp, an RSS reader, or an email client.</p>",
+          "instances": [
+            {
+              "uri": "http://shieldops-frontend.staging.svc.cluster.local/search?q=test",
+              "method": "GET",
+              "param": "q",
+              "attack": "<script>alert(1);</script>",
+              "evidence": "<script>alert(1);</script>",
+              "otherinfo": ""
+            }
+          ],
+          "count": "1",
+          "solution": "<p>Phase: Architecture and Design</p><p>Use a vetted library or framework that does not allow this weakness to occur or provides constructs that make this weakness easier to avoid.</p><p>Use the ESAPI Encoding API or a similar tool for output encoding. An important failure mode of anti-XSS tools is encoding of correct user-supplied data.</p>",
+          "otherinfo": "",
+          "reference": "<p>http://projects.webappsec.org/Cross-Site-Scripting</p>",
+          "cweid": "79",
+          "wascid": "8",
+          "sourceid": "3"
+        },
+        {
+          "pluginid": "90022",
+          "alertRef": "90022",
+          "alert": "Application Error Disclosure",
+          "name": "Application Error Disclosure",
+          "riskcode": "2",
+          "confidence": "2",
+          "riskdesc": "Medium (Medium)",
+          "desc": "<p>This page contains an error/warning message that may disclose sensitive information like the location of the file that produced the unhandled exception. This information can be used to launch further attacks against the web application. The alert could be a false positive if the error message is found inside a documentation page.</p>",
+          "instances": [
+            {
+              "uri": "http://shieldops-frontend.staging.svc.cluster.local/api/users/invalid",
+              "method": "GET",
+              "param": "",
+              "attack": "",
+              "evidence": "Error: ENOENT: no such file or directory",
+              "otherinfo": ""
+            }
+          ],
+          "count": "1",
+          "solution": "<p>Review the source code of this page. Implement custom error pages. Consider implementing a mechanism to provide a unique error reference/identifier to the client (browser) while logging the details on the server side and not exposing them to the user.</p>",
+          "otherinfo": "",
+          "reference": "",
+          "cweid": "200",
+          "wascid": "13",
+          "sourceid": "1"
+        },
+        {
+          "pluginid": "10202",
+          "alertRef": "10202",
+          "alert": "Absence of Anti-CSRF Tokens",
+          "name": "Absence of Anti-CSRF Tokens",
+          "riskcode": "1",
+          "confidence": "2",
+          "riskdesc": "Low (Medium)",
+          "desc": "<p>No Anti-CSRF tokens were found in a HTML submission form.</p>",
+          "instances": [
+            {
+              "uri": "http://shieldops-frontend.staging.svc.cluster.local/login",
+              "method": "GET",
+              "param": "",
+              "attack": "",
+              "evidence": "<form method=\"POST\" action=\"/login\">",
+              "otherinfo": ""
+            }
+          ],
+          "count": "1",
+          "solution": "<p>Phase: Architecture and Design</p><p>Use a vetted library or framework that does not allow this weakness to occur or provides constructs that make this weakness easier to avoid.</p>",
+          "otherinfo": "",
+          "reference": "<p>https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html</p>",
+          "cweid": "352",
+          "wascid": "9",
+          "sourceid": "3"
+        },
+        {
+          "pluginid": "10038",
+          "alertRef": "10038",
+          "alert": "Content Security Policy (CSP) Header Not Set",
+          "name": "Content Security Policy (CSP) Header Not Set",
+          "riskcode": "2",
+          "confidence": "3",
+          "riskdesc": "Medium (High)",
+          "desc": "<p>Content Security Policy (CSP) is an added layer of security that helps to detect and mitigate certain types of attacks, including Cross Site Scripting (XSS) and data injection attacks.</p>",
+          "instances": [
+            {
+              "uri": "http://shieldops-frontend.staging.svc.cluster.local/",
+              "method": "GET",
+              "param": "",
+              "attack": "",
+              "evidence": "",
+              "otherinfo": ""
+            }
+          ],
+          "count": "3",
+          "solution": "<p>Ensure that your web server, application server, load balancer, etc. is configured to set the Content-Security-Policy header.</p>",
+          "otherinfo": "",
+          "reference": "<p>https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP</p>",
+          "cweid": "693",
+          "wascid": "15",
+          "sourceid": "3"
+        }
+      ]
+    }
+  ]
+}

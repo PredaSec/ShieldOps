@@ -1,0 +1,112 @@
+# Prometheus values — minimal footprint for single-node kind cluster
+# No alertmanager, no pushgateway (saves ~200MB RAM)
+
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+alertmanager:
+  enabled: false
+
+pushgateway:
+  enabled: false
+
+# Prometheus server — minimal resources
+server:
+  image:
+    repository: quay.io/prometheus/prometheus
+    tag: v3.12.0
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  persistentVolume:
+    enabled: true
+    size: 2Gi
+
+  retention: "3d"
+
+  service:
+    type: NodePort
+    nodePort: 30090
+
+  # Tsdb compaction settings to reduce memory usage
+  extraArgs:
+    storage.tsdb.min-block-duration: 2h
+    storage.tsdb.max-block-duration: 2h
+    query.max-concurrency: "5"
+
+# Node exporter — collect host/node metrics
+nodeExporter:
+  enabled: true
+  image:
+    repository: quay.io/prometheus/node-exporter
+    tag: v1.11.1
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 64Mi
+
+# Kube-state-metrics
+kube-state-metrics:
+  enabled: true
+  image:
+    registry: registry.k8s.io
+    repository: kube-state-metrics/kube-state-metrics
+    tag: v2.19.0
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# Config reloader (used by sidecar)
+configmapReload:
+  prometheus:
+    image:
+      repository: quay.io/prometheus-operator/prometheus-config-reloader
+      tag: v0.91.0
+      pullPolicy: IfNotPresent
+
+# Extra scrape configs for the ShieldOps backend app
+extraScrapeConfigs: |
+  - job_name: shieldops-backend
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+            - development
+            - staging
+            - production
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: keep
+        regex: backend
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: "true"
+      - source_labels: [__meta_kubernetes_pod_ip]
+        target_label: __address__
+        replacement: $1:3000
+    metric_relabel_configs:
+      - action: labeldrop
+        regex: (pod_template_hash)
+
+  - job_name: shieldops-dashboard-backend
+    static_configs:
+      - targets:
+          - dashboard-dashboard-backend.default.svc.cluster.local:4000
+    metrics_path: /metrics

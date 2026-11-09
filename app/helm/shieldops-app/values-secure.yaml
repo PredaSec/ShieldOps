@@ -1,0 +1,99 @@
+# =============================================================================
+# SECURE VALUES — fixes V8
+# Apply these on top of any environment values file to satisfy OPA/Conftest:
+#   helm template shieldops-app . -f values-dev.yaml -f values-secure.yaml | \
+#     conftest test --policy policy/rego -
+#
+# Changes vs base values.yaml:
+#   1. resource requests + limits on every container.
+#   2. securityContext: runAsNonRoot, readOnlyRootFilesystem, drop ALL capabilities.
+#   3. Required labels: app, version, env, managed-by.
+# =============================================================================
+
+backend:
+  # V8 FIX: resource limits
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+  # V8 FIX: container security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+  # V8 FIX: pod security context
+  podSecurityContext:
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  # V8 FIX: required labels
+  labels:
+    app: shieldops-backend
+    version: "1.0.0"
+    env: dev
+    managed-by: helm
+
+frontend:
+  # V8 FIX: resource limits
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "200m"
+      memory: "128Mi"
+  # V8 FIX: container security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false   # nginx writes tmp files
+    capabilities:
+      drop: ["ALL"]
+      add: ["NET_BIND_SERVICE"]
+  # V8 FIX: pod security context
+  podSecurityContext:
+    fsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
+  # V8 FIX: required labels
+  labels:
+    app: shieldops-frontend
+    version: "1.0.0"
+    env: dev
+    managed-by: helm
+
+postgres:
+  # V8 FIX: resource limits
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "512Mi"
+  # V8 FIX: container security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 999
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false   # postgres writes data directory
+    capabilities:
+      drop: ["ALL"]
+  # V8 FIX: pod security context
+  podSecurityContext:
+    fsGroup: 999
+    seccompProfile:
+      type: RuntimeDefault
+  # V8 FIX: required labels
+  labels:
+    app: shieldops-postgres
+    version: "15"
+    env: dev
+    managed-by: helm

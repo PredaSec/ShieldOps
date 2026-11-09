@@ -1,0 +1,48 @@
+# .gitleaks.toml — Gitleaks configuration for ShieldOps
+# Gate G1: detect any committed secrets in history + working tree.
+#
+# The default gitleaks ruleset already catches AWS keys (AKIAIOSFODNN7EXAMPLE)
+# so we only add project-specific tuning here.
+
+title = "ShieldOps Gitleaks Config"
+
+[extend]
+# Extend the default built-in rules so we don't lose baseline coverage.
+useDefault = true
+
+# ---------------------------------------------------------------------------
+# Allowlist: test/demo data that is intentionally committed as examples.
+# These are NOT real credentials — they are the well-known AWS example keys
+# used in AWS documentation and intentionally present as V1 in the demo app.
+# IMPORTANT: Remove this allowlist before using this config in a real project!
+# ---------------------------------------------------------------------------
+[allowlist]
+  description = "Demo example secrets in docs + test fixtures (well-known AWS example keys, not real credentials). The live V1 secret in app source has been removed on this branch."
+  paths = [
+    '''app/VULNERABILITIES\.md''',
+    '''ai-service/test/fixtures/.*''',
+    '''policy/semgrep/.*''',
+  ]
+
+# ---------------------------------------------------------------------------
+# Custom rules (additions to the default ruleset)
+# ---------------------------------------------------------------------------
+
+[[rules]]
+  id          = "shieldops-localstack-key"
+  description = "LocalStack test credentials committed to source"
+  regex       = '''(?i)(localstack|awslocal).*['\"]test['\"]'''
+  severity    = "WARNING"
+  tags        = ["key", "localstack", "shieldops"]
+
+[[rules]]
+  id          = "shieldops-db-password"
+  description = "Potential database password in source"
+  # NOTE: Go's RE2 engine has no lookahead. To skip placeholders like "<password>",
+  # require the first char after the quote to not be '<'.
+  regex       = '''(?i)(db_password|database_password|pg_password)\s*[=:]\s*['\"][^'\"<][^'\"]{3,}['\"]'''
+  severity    = "HIGH"
+  tags        = ["password", "database", "shieldops"]
+  [rules.allowlist]
+    # The app uses placeholder "shieldops" password for local dev — accepted.
+    regexes   = ['''['\"]shieldops['\"]''']

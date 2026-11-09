@@ -1,0 +1,19 @@
+# Staging environment overrides
+namespace: staging
+
+backend:
+  image:
+    tag: staging
+  replicaCount: 1
+
+frontend:
+  image:
+    tag: staging
+  replicaCount: 1
+  service:
+    type: NodePort
+    nodePort: 30081
+
+postgres:
+  storage:
+    size: 1Gi

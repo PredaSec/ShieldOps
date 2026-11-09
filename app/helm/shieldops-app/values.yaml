@@ -1,0 +1,73 @@
+# =============================================================================
+# Default values for shieldops-app Helm chart.
+# Override per environment with values-dev.yaml / values-staging.yaml / values-prod.yaml.
+#
+# INTENTIONAL VULNERABILITY — V8
+# Resource limits, securityContext, and required labels are NOT set in the base
+# template by default. This causes OPA/Conftest (gate G5) to flag the manifests.
+# Fix: apply values-secure.yaml which supplies all compliant fields.
+# =============================================================================
+
+namespace: development
+
+backend:
+  image:
+    repository: registry:5000/shieldops-backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 3001
+  # VULN-V8 — INTENTIONAL: no resources, no securityContext, no required labels
+  resources: {}
+  securityContext: {}
+  podSecurityContext: {}
+  labels: {}
+
+frontend:
+  image:
+    repository: registry:5000/shieldops-frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    type: NodePort
+    port: 80
+    nodePort: 30080
+  # VULN-V8 — INTENTIONAL: no resources, no securityContext
+  resources: {}
+  securityContext: {}
+  podSecurityContext: {}
+  labels: {}
+
+postgres:
+  image:
+    repository: postgres
+    tag: "15-alpine"
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 5432
+  storage:
+    size: 1Gi
+    storageClassName: standard
+  credentials:
+    user: shieldops
+    password: shieldops
+    database: shieldops
+  # VULN-V8 — INTENTIONAL: no resources, no securityContext
+  resources: {}
+  securityContext: {}
+  podSecurityContext: {}
+  labels: {}
+
+probes:
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 15
+    periodSeconds: 20
+  readiness:
+    path: /readyz
+    initialDelaySeconds: 10
+    periodSeconds: 10

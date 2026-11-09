@@ -1,0 +1,68 @@
+# ShieldOps Phase 2 — local end-to-end compose
+# Separate from the platform compose in docker/.
+#
+# Usage:
+#   cd app
+#   sudo docker compose up -d --build
+#   # UI at http://localhost:8080
+
+services:
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: shieldops
+      POSTGRES_PASSWORD: shieldops
+      POSTGRES_DB: shieldops
+    volumes:
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shieldops -d shieldops"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - app-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: registry:5000/shieldops-backend:dev
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: shieldops
+      DB_PASSWORD: shieldops
+      DB_NAME: shieldops
+      PORT: "3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+    networks:
+      - app-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: registry:5000/shieldops-frontend:dev
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - app-net
+
+volumes:
+  pg_data:
+
+networks:
+  app-net:
+    driver: bridge

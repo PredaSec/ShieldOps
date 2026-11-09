@@ -1,0 +1,250 @@
+{
+  "id": null,
+  "uid": "shieldops-pipeline-health",
+  "title": "ShieldOps — Pipeline Health",
+  "description": "CI/CD gate pass/fail rates, pipeline durations, and deployment status sourced from the ShieldOps dashboard API logs",
+  "tags": ["shieldops", "pipeline", "ci", "cd"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Total Pods Running (all app ns)",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"]},
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "expr": "count(kube_pod_status_phase{namespace=~\"development|staging|production\", phase=\"Running\"})",
+          "legendFormat": "Running Pods",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "yellow", "value": 3},
+              {"color": "green", "value": 9}
+            ]
+          },
+          "color": {"mode": "thresholds"},
+          "mappings": []
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Production Deployments (Running)",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"]},
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "expr": "count(kube_pod_status_phase{namespace=\"production\", phase=\"Running\"})",
+          "legendFormat": "Production Pods",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "yellow", "value": 1},
+              {"color": "green", "value": 5}
+            ]
+          },
+          "color": {"mode": "thresholds"},
+          "mappings": []
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Failed Pods (all app namespaces)",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"]},
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "expr": "count(kube_pod_status_phase{namespace=~\"development|staging|production\", phase=~\"Failed|Unknown\"}) or vector(0)",
+          "legendFormat": "Failed Pods",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": 0},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 3}
+            ]
+          },
+          "color": {"mode": "thresholds"},
+          "mappings": []
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Container Restarts (24h delta)",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"]},
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "targets": [
+        {
+          "expr": "increase(sum(kube_pod_container_status_restarts_total{namespace=~\"development|staging|production\"})[24h:])",
+          "legendFormat": "Restarts (24h)",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": 0},
+              {"color": "yellow", "value": 3},
+              {"color": "red", "value": 10}
+            ]
+          },
+          "color": {"mode": "thresholds"},
+          "mappings": []
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Pod Count by Namespace Over Time",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom"},
+        "tooltip": {"mode": "multi"}
+      },
+      "targets": [
+        {
+          "expr": "count by(namespace) (kube_pod_status_phase{namespace=~\"development|staging|production\", phase=\"Running\"})",
+          "legendFormat": "{{namespace}}",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {"lineWidth": 2, "fillOpacity": 10}
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Container Restart Rate by Namespace",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom"},
+        "tooltip": {"mode": "multi"}
+      },
+      "targets": [
+        {
+          "expr": "sum by(namespace) (rate(kube_pod_container_status_restarts_total{namespace=~\"development|staging|production\"}[5m]))",
+          "legendFormat": "{{namespace}} restart rate",
+          "datasource": {"type": "prometheus", "uid": "prometheus"}
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {"lineWidth": 2, "fillOpacity": 10}
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Deployment Replica Status",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12},
+      "options": {
+        "showHeader": true,
+        "sortBy": [{"displayName": "Namespace", "desc": false}]
+      },
+      "targets": [
+        {
+          "expr": "kube_deployment_status_replicas_available{namespace=~\"development|staging|production\"}",
+          "legendFormat": "{{namespace}} / {{deployment}}",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {"id": "organize", "options": {
+          "renameByName": {
+            "namespace": "Namespace",
+            "deployment": "Deployment",
+            "Value": "Available Replicas"
+          }
+        }}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": 0},
+              {"color": "green", "value": 1}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "logs",
+      "title": "Pipeline Webhook Events (ShieldOps Dashboard Logs)",
+      "description": "Logs from the ShieldOps dashboard backend — shows GitLab webhook ingestions and pipeline status updates",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 20},
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true,
+        "enableLogDetails": true
+      },
+      "targets": [
+        {
+          "expr": "{container=\"dashboard-backend\"} |= \"pipeline\"",
+          "legendFormat": "",
+          "datasource": {"type": "loki", "uid": "loki"}
+        }
+      ]
+    }
+  ]
+}

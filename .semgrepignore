@@ -1,0 +1,6 @@
+# Semgrep should scan the real app + service source, NOT the intentionally-bad
+# test/demo material that exists to exercise the custom rule.
+node_modules/
+ai-service/test/
+policy/semgrep/
+docker/

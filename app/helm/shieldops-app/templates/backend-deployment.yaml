@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: shieldops-backend
+    chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    release: {{ .Release.Name }}
+    {{- with .Values.backend.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  replicas: {{ .Values.backend.replicaCount }}
+  selector:
+    matchLabels:
+      app: shieldops-backend
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      annotations:
+        # Tell Prometheus (Phase 6) to scrape the backend /metrics endpoint.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3001"
+        prometheus.io/path: "/metrics"
+      labels:
+        app: shieldops-backend
+        release: {{ .Release.Name }}
+        {{- with .Values.backend.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      # VULN-V8 — INTENTIONAL: podSecurityContext omitted unless values-secure.yaml is applied
+      {{- with .Values.backend.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: backend
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          ports:
+            - containerPort: 3001
+          env:
+            - name: DB_HOST
+              value: postgres
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              value: {{ .Values.postgres.credentials.user | quote }}
+            - name: DB_PASSWORD
+              value: {{ .Values.postgres.credentials.password | quote }}
+            - name: DB_NAME
+              value: {{ .Values.postgres.credentials.database | quote }}
+            - name: PORT
+              value: "3001"
+          # K8s liveness probe (requires GET /healthz → 200)
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: 3001
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+          # K8s readiness probe (requires GET /readyz → 200 + db connected)
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: 3001
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+          # VULN-V8 — INTENTIONAL: resources and securityContext omitted by default
+          {{- with .Values.backend.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.backend.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}

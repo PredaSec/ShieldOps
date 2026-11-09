@@ -1,0 +1,42 @@
+[
+  {
+    "RuleID": "generic-api-key",
+    "Description": "Detected a Generic API Key, potentially exposing access to various services and sensitive operations.",
+    "StartLine": 12,
+    "EndLine": 12,
+    "StartColumn": 15,
+    "EndColumn": 55,
+    "Match": "api_key = \"sk-abcdef1234567890abcdef1234567890\"",
+    "Secret": "sk-abcdef1234567890abcdef1234567890",
+    "File": "app/backend/src/config.js",
+    "SymlinkFile": "",
+    "Commit": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+    "Entropy": 4.2,
+    "Author": "dev@shieldops.local",
+    "Email": "dev@shieldops.local",
+    "Date": "2026-05-01T10:00:00Z",
+    "Message": "add api key configuration",
+    "Tags": [],
+    "RuleDescription": "Generic API Key"
+  },
+  {
+    "RuleID": "aws-access-token",
+    "Description": "Identified a pattern that may indicate AWS credentials, risking unauthorized cloud resource access and data breaches.",
+    "StartLine": 3,
+    "EndLine": 3,
+    "StartColumn": 20,
+    "EndColumn": 40,
+    "Match": "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE",
+    "Secret": "AKIAIOSFODNN7EXAMPLE",
+    "File": ".env.bak",
+    "SymlinkFile": "",
+    "Commit": "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3",
+    "Entropy": 3.8,
+    "Author": "dev@shieldops.local",
+    "Email": "dev@shieldops.local",
+    "Date": "2026-05-10T14:30:00Z",
+    "Message": "accidentally commit env backup",
+    "Tags": [],
+    "RuleDescription": "AWS Access Token"
+  }
+]

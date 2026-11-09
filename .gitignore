@@ -1,0 +1,66 @@
+# --- secrets / env (NEVER commit real keys) ---
+.env
+*.env
+!*.env.example
+!.env.example
+
+# --- node ---
+node_modules/
+npm-debug.log*
+
+# --- terraform state ---
+.terraform/
+*.tfstate
+*.tfstate.*
+errored.tfstate
+crash.log
+
+# --- scan / report artifacts ---
+*.sarif
+gitleaks.json
+semgrep.json
+trivy*.json
+checkov.json
+tfsec.json
+conftest.json
+zap-report.*
+ai-report*.json
+ai-report*.md
+
+# --- running service data volumes (do NOT push the GitLab server's own data) ---
+docker/gitlab/
+docker/postgres/
+docker/localstack/
+docker/registry/
+docker/gitlab-runner/
+docker/infrastructure/
+
+# --- kube / tmp ---
+*.kubeconfig
+/tmp/
+
+# --- local Claude Code config (not project source) ---
+.claude/
+
+# --- keep test fixtures (they match the scan-artifact patterns above) ---
+!ai-service/test/fixtures/*.json
+
+# --- build output ---
+dist/
+
+# --- LaTeX build artifacts ---
+*.aux
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.toc
+*.lof
+*.lot
+*.out
+*.synctex.gz
+*.log
+
+# --- local-only files ---
+.kubeconfig-internal
+supervisor_notes.txt

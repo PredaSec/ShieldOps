@@ -1,0 +1,119 @@
+# Falco values — ShieldOps observability stack
+# Using modern_ebpf driver (kernel 6.x supports it natively)
+
+image:
+  pullPolicy: IfNotPresent
+  registry: docker.io
+  repository: falcosecurity/falco
+  tag: "0.44.0"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Use modern eBPF — no kernel module compilation needed
+driver:
+  enabled: true
+  kind: modern_ebpf
+
+# falcoctl for artifact management
+falcoctl:
+  image:
+    pullPolicy: IfNotPresent
+    registry: docker.io
+    repository: falcosecurity/falcoctl
+    tag: "0.13.0"
+  artifact:
+    install:
+      enabled: true
+    follow:
+      # Disable follow sidecar to save memory
+      enabled: false
+
+# Output Falco alerts as JSON for Loki scraping
+falco:
+  json_output: true
+  json_include_output_property: true
+  log_level: info
+  log_stderr: true
+  log_syslog: false
+
+  stdout_output:
+    enabled: true
+
+  file_output:
+    enabled: false
+    keep_alive: false
+    filename: /tmp/falco.txt
+
+  syslog_output:
+    enabled: false
+
+# Custom ShieldOps rules — two rules: shell-in-container and sensitive-path-write
+# Note: container_started macro not available in falco-rules:5, use spawned_process
+customRules:
+  shieldops-rules.yaml: |
+    - list: allowed_k8s_shells
+      items: [sh, bash, dash, ash, ksh, zsh, fish]
+
+    - rule: ShieldOps Shell Spawned in Container
+      desc: A shell was spawned inside a running container. Indicates possible intrusion or exec debugging.
+      condition: >
+        spawned_process
+        and container
+        and proc.name in (allowed_k8s_shells)
+        and not proc.pname in (allowed_k8s_shells)
+      output: >
+        Shell spawned inside container
+        (user=%user.name container_id=%container.id
+        container_name=%container.name
+        container_image=%container.image.repository
+        proc=%proc.name parent=%proc.pname
+        cmdline=%proc.cmdline
+        namespace=%k8s.ns.name pod=%k8s.pod.name)
+      priority: WARNING
+      tags: [container, shell, shieldops, mitre_execution]
+
+    - macro: shieldops_sensitive_dir_write
+      condition: >
+        open_write
+        and (
+          fd.name startswith /etc/
+          or fd.name startswith /bin/
+          or fd.name startswith /sbin/
+          or fd.name startswith /usr/bin/
+          or fd.name startswith /usr/sbin/
+          or fd.name startswith /root/
+        )
+        and not fd.name in (/etc/hosts, /etc/resolv.conf, /etc/hostname)
+
+    - rule: ShieldOps Write to Sensitive Path
+      desc: A container process wrote to a sensitive system directory. May indicate persistence or binary replacement.
+      condition: >
+        shieldops_sensitive_dir_write
+        and container
+        and not proc.name in (apk, apt, apt-get, dpkg, rpm, yum, pip, npm, yarn)
+      output: >
+        Write to sensitive path inside container
+        (user=%user.name container_id=%container.id
+        container_name=%container.name
+        container_image=%container.image.repository
+        proc=%proc.name file=%fd.name
+        namespace=%k8s.ns.name pod=%k8s.pod.name)
+      priority: ERROR
+      tags: [container, filesystem, sensitive, shieldops, mitre_persistence]
+
+# Tolerate all taints (single-node cluster)
+tolerations:
+  - effect: NoSchedule
+    operator: Exists
+
+serviceAccount:
+  create: true
+
+rbac:
+  create: true

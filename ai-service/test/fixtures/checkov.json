@@ -1,0 +1,93 @@
+{
+  "check_type": "terraform",
+  "results": {
+    "passed_checks": [
+      {
+        "check_id": "CKV_AWS_18",
+        "check_address": "aws_s3_bucket.reports",
+        "check_result": { "result": "passed", "evaluated_keys": ["logging"] },
+        "resource": "aws_s3_bucket.reports",
+        "file_path": "/terraform/main.tf",
+        "file_line_range": [1, 10],
+        "check": {
+          "id": "CKV_AWS_18",
+          "name": "Ensure the S3 bucket has access logging enabled",
+          "severity": "MEDIUM"
+        }
+      }
+    ],
+    "failed_checks": [
+      {
+        "check_id": "CKV_AWS_19",
+        "check_address": "aws_s3_bucket.reports",
+        "check_result": { "result": "failed", "evaluated_keys": ["server_side_encryption_configuration"] },
+        "resource": "aws_s3_bucket.reports",
+        "file_path": "/terraform/main.tf",
+        "file_line_range": [1, 30],
+        "repo_file_path": "terraform/main.tf",
+        "resource_address": "aws_s3_bucket.reports",
+        "check": {
+          "id": "CKV_AWS_19",
+          "name": "Ensure all data stored in the S3 bucket is securely encrypted at rest",
+          "severity": "CRITICAL",
+          "guideline": "https://docs.bridgecrew.io/docs/general_4"
+        }
+      },
+      {
+        "check_id": "CKV_AWS_21",
+        "check_address": "aws_s3_bucket.reports",
+        "check_result": { "result": "failed", "evaluated_keys": ["versioning"] },
+        "resource": "aws_s3_bucket.reports",
+        "file_path": "/terraform/main.tf",
+        "file_line_range": [1, 30],
+        "repo_file_path": "terraform/main.tf",
+        "check": {
+          "id": "CKV_AWS_21",
+          "name": "Ensure all data stored in the S3 bucket have versioning enabled",
+          "severity": "MEDIUM",
+          "guideline": "https://docs.bridgecrew.io/docs/s3_16"
+        }
+      },
+      {
+        "check_id": "CKV_AWS_20",
+        "check_address": "aws_s3_bucket.reports",
+        "check_result": { "result": "failed", "evaluated_keys": ["acl"] },
+        "resource": "aws_s3_bucket.reports",
+        "file_path": "/terraform/main.tf",
+        "file_line_range": [1, 30],
+        "repo_file_path": "terraform/main.tf",
+        "check": {
+          "id": "CKV_AWS_20",
+          "name": "Ensure the S3 bucket does not have public ACL",
+          "severity": "HIGH",
+          "guideline": "https://docs.bridgecrew.io/docs/s3_1-acl"
+        }
+      },
+      {
+        "check_id": "CKV_AWS_55",
+        "check_address": "aws_s3_bucket.reports",
+        "check_result": { "result": "failed", "evaluated_keys": ["lifecycle_rule"] },
+        "resource": "aws_s3_bucket.reports",
+        "file_path": "/terraform/main.tf",
+        "file_line_range": [1, 30],
+        "repo_file_path": "terraform/main.tf",
+        "check": {
+          "id": "CKV_AWS_55",
+          "name": "Ensure S3 bucket has ignore public ACLs enabled",
+          "severity": "LOW",
+          "guideline": "https://docs.bridgecrew.io/docs/bc_aws_s3_19"
+        }
+      }
+    ],
+    "skipped_checks": [],
+    "parsing_errors": []
+  },
+  "summary": {
+    "passed": 1,
+    "failed": 4,
+    "skipped": 0,
+    "parsing_error": 0,
+    "resource_count": 3,
+    "checkov_version": "3.2.33"
+  }
+}

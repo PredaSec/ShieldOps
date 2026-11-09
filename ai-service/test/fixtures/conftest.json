@@ -1,0 +1,189 @@
+[
+	{
+		"filename": "",
+		"namespace": "main",
+		"successes": 106,
+		"failures": [
+			{
+				"msg": "Deployment 'backend': container 'backend' is missing resources.limits.cpu",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'backend': container 'backend' is missing resources.limits.memory",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'backend': container 'backend' is missing resources.requests.cpu",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'backend': container 'backend' is missing resources.requests.memory",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'backend': container 'backend' must set securityContext.allowPrivilegeEscalation: false",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'backend': container 'backend' must set securityContext.runAsNonRoot: true or securityContext.runAsUser \u003e 0",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'backend': missing a team/owner label ('team' or 'managed-by') on Deployment metadata",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'backend': missing an environment label ('environment' or 'env') on Deployment metadata",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'backend': pod template is missing a team/owner label ('team' or 'managed-by')",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'backend': pod template is missing an environment label ('environment' or 'env')",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'frontend': container 'frontend' is missing resources.limits.cpu",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'frontend': container 'frontend' is missing resources.limits.memory",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'frontend': container 'frontend' is missing resources.requests.cpu",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'frontend': container 'frontend' is missing resources.requests.memory",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'frontend': container 'frontend' must set securityContext.allowPrivilegeEscalation: false",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'frontend': container 'frontend' must set securityContext.runAsNonRoot: true or securityContext.runAsUser \u003e 0",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'frontend': missing a team/owner label ('team' or 'managed-by') on Deployment metadata",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'frontend': missing an environment label ('environment' or 'env') on Deployment metadata",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'frontend': pod template is missing a team/owner label ('team' or 'managed-by')",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'frontend': pod template is missing an environment label ('environment' or 'env')",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'postgres': container 'postgres' is missing resources.limits.cpu",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'postgres': container 'postgres' is missing resources.limits.memory",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'postgres': container 'postgres' is missing resources.requests.cpu",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'postgres': container 'postgres' is missing resources.requests.memory",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'postgres': container 'postgres' must set securityContext.allowPrivilegeEscalation: false",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'postgres': container 'postgres' must set securityContext.runAsNonRoot: true or securityContext.runAsUser \u003e 0",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'postgres': missing a team/owner label ('team' or 'managed-by') on Deployment metadata",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'postgres': missing an environment label ('environment' or 'env') on Deployment metadata",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'postgres': pod template is missing a team/owner label ('team' or 'managed-by')",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			},
+			{
+				"msg": "Deployment 'postgres': pod template is missing an environment label ('environment' or 'env')",
+				"metadata": {
+					"query": "data.main.deny"
+				}
+			}
+		]
+	}
+]

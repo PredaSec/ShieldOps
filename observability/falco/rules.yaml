@@ -1,0 +1,136 @@
+# ShieldOps custom Falco rules
+# Detect: shell spawned in container, unexpected outbound connections, writes to sensitive paths
+
+- list: shieldops_container_names
+  items: [backend, frontend, postgres, falco, prometheus, grafana, loki, promtail]
+
+- list: allowed_k8s_shells
+  items: [sh, bash, dash, ash, ksh, zsh, fish]
+
+# ============================================================
+# Rule 1: Shell spawned inside a container
+# Detects when a shell binary is executed inside any container.
+# High-severity signal for container breakout / lateral movement.
+# ============================================================
+- rule: ShieldOps Shell Spawned in Container
+  desc: >
+    A shell was spawned inside a running container. This is a strong indicator
+    of an active intrusion, container escape attempt, or debugging session that
+    should be investigated.
+  condition: >
+    spawned_process
+    and container
+    and not container.image.repository in (allowed_k8s_shells)
+    and proc.name in (allowed_k8s_shells)
+    and not proc.pname in (allowed_k8s_shells)
+    and not (proc.cmdline startswith "runc" or proc.cmdline startswith "containerd")
+  output: >
+    Shell spawned inside container (user=%user.name user_loginuid=%user.loginuid
+    container_id=%container.id container_name=%container.name
+    container_image=%container.image.repository
+    proc=%proc.name parent=%proc.pname
+    cmdline=%proc.cmdline namespace=%k8s.ns.name pod=%k8s.pod.name)
+  priority: WARNING
+  tags: [container, shell, shieldops, mitre_execution]
+
+# ============================================================
+# Rule 2: Unexpected outbound network connection from container
+# Detects outbound connections to external IPs (not cluster-internal).
+# Excludes known-good destinations like kube-apiserver.
+# ============================================================
+- macro: allowed_outbound_destination
+  condition: >
+    fd.sip in ("127.0.0.1", "::1")
+    or fd.sport in (53, 443, 80, 3000, 3100, 4000, 5432, 6443, 8080, 9090)
+    or fd.snet startswith "10."
+    or fd.snet startswith "172."
+    or fd.snet startswith "192.168."
+
+- rule: ShieldOps Unexpected Outbound Connection
+  desc: >
+    A container initiated an unexpected outbound network connection. This may
+    indicate command-and-control (C2) activity, data exfiltration, or an
+    application misconfiguration reaching external services.
+  condition: >
+    outbound
+    and container
+    and not allowed_outbound_destination
+    and fd.typechar = 4
+    and not proc.name in (curl, wget, git, node, npm, pip, python, python3)
+  output: >
+    Unexpected outbound connection from container (user=%user.name
+    container_id=%container.id container_name=%container.name
+    container_image=%container.image.repository
+    proc=%proc.name dest_ip=%fd.rip dest_port=%fd.rport
+    namespace=%k8s.ns.name pod=%k8s.pod.name)
+  priority: NOTICE
+  tags: [container, network, outbound, shieldops, mitre_exfiltration]
+
+# ============================================================
+# Rule 3: Write to sensitive path inside container
+# Detects writes to /etc, /bin, /sbin, /usr/bin, /usr/sbin
+# which may indicate persistence mechanisms or binary replacement.
+# ============================================================
+- list: sensitive_directories
+  items:
+    - /etc
+    - /bin
+    - /sbin
+    - /usr/bin
+    - /usr/sbin
+    - /usr/local/bin
+    - /root
+    - /proc
+
+- macro: sensitive_directory_write
+  condition: >
+    open_write
+    and (
+      fd.name startswith /etc/
+      or fd.name startswith /bin/
+      or fd.name startswith /sbin/
+      or fd.name startswith /usr/bin/
+      or fd.name startswith /usr/sbin/
+      or fd.name startswith /usr/local/bin/
+      or fd.name startswith /root/
+    )
+    and not fd.name in (/etc/hosts, /etc/resolv.conf, /etc/hostname)
+
+- rule: ShieldOps Write to Sensitive Path
+  desc: >
+    A process inside a container attempted to write to a sensitive system
+    directory. This is a strong indicator of a persistence attempt, privilege
+    escalation, or supply-chain attack altering system binaries.
+  condition: >
+    sensitive_directory_write
+    and container
+    and not proc.name in (apk, apt, apt-get, dpkg, rpm, yum, pip, npm, yarn)
+    and not container.image.repository in (init, pause)
+  output: >
+    Write to sensitive path inside container (user=%user.name
+    container_id=%container.id container_name=%container.name
+    container_image=%container.image.repository
+    proc=%proc.name file=%fd.name
+    namespace=%k8s.ns.name pod=%k8s.pod.name)
+  priority: ERROR
+  tags: [container, filesystem, sensitive, shieldops, mitre_persistence]
+
+# ============================================================
+# Rule 4: Privileged container created
+# Detects when a new privileged container starts in a non-system namespace.
+# ============================================================
+- rule: ShieldOps Privileged Container Started
+  desc: >
+    A privileged container was started in an application namespace. Privileged
+    containers have full host access and are a significant security risk.
+  condition: >
+    container_started
+    and container.privileged = true
+    and k8s.ns.name in (development, staging, production)
+  output: >
+    Privileged container started in app namespace (container_id=%container.id
+    container_name=%container.name
+    container_image=%container.image.repository
+    namespace=%k8s.ns.name pod=%k8s.pod.name)
+  priority: CRITICAL
+  tags: [container, privilege, shieldops, mitre_privilege_escalation]

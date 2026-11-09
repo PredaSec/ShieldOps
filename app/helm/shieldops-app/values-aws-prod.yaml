@@ -1,0 +1,143 @@
+# =============================================================================
+# values-aws-prod.yaml — ShieldOps Helm overrides for real AWS (ECS/Fargate POC)
+#
+# Usage (from ci/deploy-aws.sh):
+#   helm upgrade --install shieldops app/helm/shieldops-app \
+#     -n production \
+#     -f app/helm/shieldops-app/values-prod.yaml \
+#     -f app/helm/shieldops-app/values-secure.yaml \
+#     -f app/helm/shieldops-app/values-aws-prod.yaml \
+#     --set backend.image.tag="${IMAGE_TAG}" \
+#     --set frontend.image.tag="${IMAGE_TAG}"
+#
+# Layer order (last file wins):
+#   values.yaml (base) → values-prod.yaml (replicas/namespace) →
+#   values-secure.yaml (OPA-required securityContext/resources/labels) →
+#   values-aws-prod.yaml (ECR image refs, RDS endpoint, ALB ingress)
+#
+# NOTE: This file is committed without real ECR account IDs.
+# The IMAGE_TAG and ECR_REGISTRY are injected at deploy time by ci/deploy-aws.sh.
+# The RDS host is fetched from Secrets Manager by the ECS task — but if deploying
+# via Helm to a future EKS cluster, set backend.env.DB_HOST here (sourced from
+# "terraform output db_instance_endpoint").
+# =============================================================================
+
+namespace: production
+
+# ---------------------------------------------------------------------------
+# Backend — real ECR image, RDS connection via environment
+# ---------------------------------------------------------------------------
+backend:
+  image:
+    # ECR URL format: <account-id>.dkr.ecr.<region>.amazonaws.com/shieldops-backend
+    # Set at deploy time: --set backend.image.repository=<ECR_BACKEND_URL>
+    repository: REPLACE_WITH_ECR_BACKEND_URL
+    tag: latest
+    # SECURITY: Always pull from ECR on EKS; credentials from node's IAM instance profile.
+    pullPolicy: Always
+
+  replicaCount: 2
+
+  service:
+    type: ClusterIP  # ALB Ingress Controller handles external exposure
+    port: 3001
+
+  # AWS-specific environment: DB credentials come from Secrets Manager via ECS
+  # secrets injection (see main.tf aws_ecs_task_definition.backend).
+  # For Helm-on-EKS: use an External Secrets Operator or inject via CI:
+  env:
+    NODE_ENV: production
+    PORT: "3001"
+    # DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, DB_PORT are injected from
+    # Secrets Manager at ECS task start. If using EKS, uncomment and
+    # set these from the terraform output / AWS SSM parameter store.
+    # DB_HOST: ""        # terraform output db_instance_endpoint (host part)
+    # DB_PORT: "5432"
+    # DB_NAME: "shieldops"
+
+  # Inherit secure resources/securityContext/labels from values-secure.yaml.
+  # AWS-specific label additions:
+  labels:
+    app: shieldops-backend
+    version: "1.0.0"
+    env: production
+    managed-by: helm
+    aws-deploy: "true"
+
+# ---------------------------------------------------------------------------
+# Frontend — real ECR image, ALB-aware service
+# ---------------------------------------------------------------------------
+frontend:
+  image:
+    # Set at deploy time: --set frontend.image.repository=<ECR_FRONTEND_URL>
+    repository: REPLACE_WITH_ECR_FRONTEND_URL
+    tag: latest
+    pullPolicy: Always
+
+  replicaCount: 2
+
+  service:
+    # On EKS with AWS Load Balancer Controller: use ClusterIP + Ingress.
+    # On plain ECS Fargate: service/ingress handled by ALB target group (no Helm needed).
+    type: ClusterIP
+    port: 8080
+
+  labels:
+    app: shieldops-frontend
+    version: "1.0.0"
+    env: production
+    managed-by: helm
+    aws-deploy: "true"
+
+# ---------------------------------------------------------------------------
+# Postgres — DISABLED in AWS deployment (use RDS instead)
+# ---------------------------------------------------------------------------
+# The in-cluster postgres StatefulSet is replaced by RDS PostgreSQL.
+# Setting enabled: false tells the Helm chart to skip postgres resources.
+# RDS endpoint is stored in Secrets Manager (prod/shieldops/db → host field).
+postgres:
+  enabled: false
+  # SECURITY: No in-cluster database in production.
+  # RDS provides: automated backups, Multi-AZ, encryption at rest (KMS),
+  # patching, and point-in-time recovery — none of which a pod provides.
+
+# ---------------------------------------------------------------------------
+# Ingress — AWS ALB via aws-load-balancer-controller (EKS scenario)
+# ---------------------------------------------------------------------------
+# Uncomment this section when deploying to EKS with the AWS Load Balancer
+# Controller installed (helm install aws-load-balancer-controller ...).
+# For ECS Fargate, the ALB is managed by Terraform (see terraform/aws/main.tf).
+#
+# ingress:
+#   enabled: true
+#   className: alb
+#   annotations:
+#     kubernetes.io/ingress.class: alb
+#     alb.ingress.kubernetes.io/scheme: internet-facing
+#     alb.ingress.kubernetes.io/target-type: ip
+#     alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}]'
+#     alb.ingress.kubernetes.io/ssl-redirect: "443"
+#     alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:REGION:ACCOUNT:certificate/ID"
+#     alb.ingress.kubernetes.io/healthcheck-path: /healthz
+#   hosts:
+#     - host: shieldops.yourdomain.com
+#       paths:
+#         - path: /api
+#           pathType: Prefix
+#           service: shieldops-backend
+#         - path: /
+#           pathType: Prefix
+#           service: shieldops-frontend
+
+# ---------------------------------------------------------------------------
+# Probes — tighten for production latency
+# ---------------------------------------------------------------------------
+probes:
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 20
+    periodSeconds: 30
+  readiness:
+    path: /readyz
+    initialDelaySeconds: 15
+    periodSeconds: 15

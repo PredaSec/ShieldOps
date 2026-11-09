@@ -1,0 +1,107 @@
+# Grafana values — ShieldOps observability stack
+
+image:
+  repository: grafana/grafana
+  tag: "12.3.1"
+  pullPolicy: IfNotPresent
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Admin credentials
+adminUser: admin
+adminPassword: shieldops-grafana
+
+# Persistence
+persistence:
+  enabled: true
+  size: 1Gi
+
+# The init-chown-data container runs `chown -R 472:472 /var/lib/grafana` with a
+# locked-down capability set (drop ALL, add only CHOWN — no DAC_OVERRIDE). After a
+# restart it crash-loops with "Permission denied" on the pdf/png/csv temp dirs it
+# can no longer traverse, blocking grafana from ever starting. It's redundant with
+# the pod's fsGroup:472 (kubelet already group-owns the volume at mount), so disable
+# it — fsGroup handles volume permissions on its own.
+initChownData:
+  enabled: false
+
+# Service — NodePort for access from host via kind node IP
+service:
+  type: NodePort
+  port: 3000
+  nodePort: 32000
+
+# Grafana config
+grafana.ini:
+  security:
+    allow_embedding: true
+  auth.anonymous:
+    enabled: false
+
+# Datasources provisioning
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus-server.monitoring.svc.cluster.local:80
+        isDefault: true
+        editable: false
+        uid: prometheus
+        jsonData:
+          timeInterval: "30s"
+      - name: Loki
+        type: loki
+        access: proxy
+        url: http://loki-stack.monitoring.svc.cluster.local:3100
+        editable: false
+        uid: loki
+        jsonData:
+          maxLines: 1000
+
+# Dashboard provisioning via sidecar
+sidecar:
+  image:
+    repository: kiwigrid/k8s-sidecar
+    tag: 2.5.0
+    pullPolicy: IfNotPresent
+  dashboards:
+    enabled: true
+    label: grafana_dashboard
+    labelValue: "1"
+    searchNamespace: monitoring
+    folder: /tmp/dashboards
+    defaultFolderName: ShieldOps
+    provider:
+      foldersFromFilesStructure: false
+  datasources:
+    enabled: false
+
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: "sidecar"
+        orgId: 1
+        folder: "ShieldOps"
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /tmp/dashboards
+
+# Disable test framework to save resources
+testFramework:
+  enabled: false
+
+serviceAccount:
+  create: true
+  autoMount: true

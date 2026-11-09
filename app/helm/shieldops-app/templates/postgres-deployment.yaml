@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: shieldops-postgres
+    chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    release: {{ .Release.Name }}
+    {{- with .Values.postgres.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shieldops-postgres
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: shieldops-postgres
+        release: {{ .Release.Name }}
+        {{- with .Values.postgres.labels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      # VULN-V8 — INTENTIONAL: podSecurityContext omitted unless values-secure.yaml is applied
+      {{- with .Values.postgres.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: postgres
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          imagePullPolicy: {{ .Values.postgres.image.pullPolicy }}
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.credentials.user | quote }}
+            - name: POSTGRES_PASSWORD
+              value: {{ .Values.postgres.credentials.password | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.credentials.database | quote }}
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            - name: init-sql
+              mountPath: /docker-entrypoint-initdb.d
+          # VULN-V8 — INTENTIONAL: resources and securityContext omitted by default
+          {{- with .Values.postgres.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.postgres.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+        - name: init-sql
+          configMap:
+            name: postgres-init-sql

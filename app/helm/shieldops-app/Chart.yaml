@@ -1,0 +1,15 @@
+apiVersion: v2
+name: shieldops-app
+description: >
+  ShieldOps 3-tier task-management application (frontend + backend + postgres).
+  Contains intentional vulnerabilities for DevSecOps pipeline demo (Phase 2).
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - shieldops
+  - devsecops
+  - demo
+maintainers:
+  - name: ShieldOps Team
+    email: ops@shieldops.local
